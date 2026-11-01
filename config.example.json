@@ -1,0 +1,8 @@
+{
+  "listen": "127.0.0.1:3838",
+  "http2": false,
+  "proxy": "",
+  "modelMap": {},
+  "apiKeys": [],
+  "channels": []
+}

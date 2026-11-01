@@ -1,0 +1,50 @@
+# Local configuration and credentials
+/config.json
+/config.*.json
+!/config.example.json
+/.config.json.*.tmp
+.env
+.env.*
+!.env.example
+
+# Runtime logs and generated artifacts
+*.log
+/request_logs.jsonl
+/artifacts/
+
+# Backups and temporary files
+*.bak
+*.production-backup-*
+*.tmp
+*~
+
+# Python caches, virtual environments, and test output
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local agent state, editor history, and scratch files
+.claude/
+.ccg/
+.sisyphus/
+.history/
+/gpt-*.txt
+/llq.py
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
