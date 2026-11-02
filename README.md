@@ -29,7 +29,7 @@ Configuration changes are saved to JSON and external file changes are reloaded.
 - `/admin/logs`: request results, response sizes, and full error details.
 - `/admin/security`: shared access keys and admin login.
 
-Supported channel types are `openai-chat`, `openai-oai`, `openai-responses`,
+Supported channel types are `openai-chat`, `openai-responses`,
 `claude`, and `gemini`. Global and per-channel HTTP(S)/SOCKS proxies are supported.
 
 Paste import extracts only the channel name, upstream base URL, API key, and
