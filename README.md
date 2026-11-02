@@ -32,11 +32,11 @@ Configuration changes are saved to JSON and external file changes are reloaded.
 Supported channel types are `openai-chat`, `openai-oai`, `openai-responses`,
 `claude`, and `gemini`. Global and per-channel HTTP(S)/SOCKS proxies are supported.
 
-## Tests
-
-```sh
-python -m unittest test_llm_proxy
-```
+Paste import extracts only the channel name, upstream base URL, API key, and
+protocol from recognized fields. Other copied settings are discarded. Codex
+imports read the selected provider and the separate auth key when present.
+Parsing runs locally in the browser; saving writes the extracted credentials
+to the ignored local configuration file.
 
 Local configuration, request logs, backups, and generated files are excluded
 from Git. Keep upstream credentials in the local configuration, not in source.

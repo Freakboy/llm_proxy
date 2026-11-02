@@ -24,7 +24,7 @@
 
 <dialog id="proxyDialog"><div class="dialog-head"><h2>全局代理</h2><button onclick="$('proxyDialog').close()">×</button></div><form id="proxyForm"><div class="form"><div class="hint" id="proxyState">当前代理：加载中</div><label>默认代理 <small>输入新值覆盖；留空保存表示保留当前配置</small><input id="globalProxy" placeholder="http://127.0.0.1:7890"></label></div><div class="dialog-actions"><button class="primary" type="submit">保存全局代理</button><button type="button" class="danger" onclick="clearProxy()">清除全局代理</button></div></form></dialog>
 
-<dialog id="importDialog"><div class="dialog-head"><h2>粘贴内容 / sub2api / CCS 导入</h2><button type="button" onclick="$('importDialog').close()" aria-label="关闭">×</button></div><form id="importForm"><div class="form"><label>粘贴链接、JSON、环境变量或含 URL 和 API Key 的文本<textarea id="importSource" rows="6" required placeholder="Base URL: https://api.example.com&#10;API Key: sk-...&#10;&#10;也支持 CCS 导出链接、JSON、curl 请求和环境变量"></textarea></label><label>导入协议<select id="importType"><option value="auto">自动识别，无法识别时使用 OpenAI Chat</option><option value="openai-responses">Codex / openai-responses</option><option value="claude">Claude</option><option value="gemini">Gemini</option><option value="openai-chat">OpenAI Chat</option><option value="openai-oai">OpenAI OAI</option></select></label><div class="hint" id="importNotice">解析只在浏览器本地进行，不访问链接。解析后进入渠道编辑，保存后才写入配置。</div></div><div class="dialog-actions"><button class="primary" type="submit">解析并编辑</button></div></form></dialog>
+<dialog id="importDialog"><div class="dialog-head"><h2>粘贴内容 / sub2api / CCS 导入</h2><button type="button" onclick="$('importDialog').close()" aria-label="关闭">×</button></div><form id="importForm"><div class="form"><label>粘贴链接、JSON、Codex 配置或含 URL 和 API Key 的文本<textarea id="importSource" rows="8" required placeholder="可一起粘贴 Codex config.toml 和 auth.json&#10;支持 experimental_bearer_token、OpenCode options.apiKey/baseURL&#10;&#10;Base URL: https://api.example.com&#10;API Key: test-key"></textarea></label><label>导入协议<select id="importType"><option value="auto">自动识别，无法识别时使用 Chat Completions</option><option value="openai-responses">OpenAI Responses / Codex</option><option value="claude">Claude</option><option value="gemini">Gemini</option><option value="openai-chat">OpenAI Chat Completions</option></select></label><div class="hint" id="importNotice">解析只在浏览器本地进行，不访问链接。解析后进入渠道编辑，保存后才写入配置。</div></div><div class="dialog-actions"><button class="primary" type="submit">解析并编辑</button></div></form></dialog>
 <dialog id="editorDialog" class="expanded"><div class="dialog-head"><h2 id="editorTitle">扩大编辑</h2><button type="button" onclick="$('editorDialog').close()" aria-label="关闭">×</button></div><div class="form"><textarea id="largeEditor" spellcheck="false"></textarea></div><div class="dialog-actions"><button type="button" class="primary" id="applyEditor">应用</button><button type="button" onclick="$('editorDialog').close()">取消</button></div></dialog>
 <script>
 let state={channels:[],modelMap:{}};let selectedType='all';let activeJob=null;let lastConfigMtime=null;const $=id=>document.getElementById(id);const lines=v=>v.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
@@ -51,34 +51,64 @@ async function pollJob(){if(!activeJob)return;try{const job=await api(`/admin/ap
 $('channelForm').addEventListener('submit',saveChannel);$('proxyForm').addEventListener('submit',saveProxy);$('search').addEventListener('input',renderRows);$('statusFilter').addEventListener('change',renderRows);$('sortBy').addEventListener('change',renderRows);loadConfig();setInterval(()=>{if(!document.querySelector('dialog[open]')&&!activeJob)loadConfig(true)},3000);
 const importButton=document.createElement('button');importButton.textContent='粘贴解析 / CCS 导入';importButton.onclick=()=>{$('importNotice').textContent='粘贴内容后点击解析，可检查 URL、API Key 并选择协议，保存后才写入配置';$('importDialog').showModal()};document.querySelector('.controls').insertBefore(importButton,$('updateAll'));
 function parseImport(source,type){
-  let data,version,inferred='openai-chat';const text=source.trim();
-  if(text.startsWith('{'))data=JSON.parse(text);
-  else{
-    const links=text.match(/[a-z][a-z0-9+.-]*:\/\/[^\s<>"'`]+/gi)||[];
-    const exports=links.filter(value=>{try{return new URL(value).searchParams.has('data')}catch{return false}});
-    if(exports.length>1)throw new Error('检测到多个导出链接，请一次粘贴一个');
-    if(exports.length){const link=new URL(exports[0]);const encoded=link.searchParams.get('data');version=link.searchParams.get('v');const base64=encoded.replace(/ /g,'+').replace(/-/g,'+').replace(/_/g,'/');data=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Uint8Array.from(atob(base64.padEnd(Math.ceil(base64.length/4)*4,'=')),c=>c.charCodeAt(0))))}
-    else{
-      const urls=[...new Set(links.filter(value=>/^https?:/i.test(value)).map(value=>value.replace(/[),.;，。；）]+$/g,'')))];
-      if(urls.length!==1)throw new Error(urls.length?'检测到多个 URL，请保留一个上游地址':'没有找到 http(s) URL');
-      const keys=[...text.matchAll(/(?:authorization["']?\s*[:=]\s*["']?\s*bearer\s+|(?:[a-z]+[_-])*(?:api[_ -]?key|auth[_-]?token|token|key|密钥|秘钥)["']?\s*[:=：]\s*["']?)([^\s"'`;,，]+)/gi)].map(match=>match[1]);
-      if(!keys.length)keys.push(...(text.match(/\bsk-[a-zA-Z0-9_-]+\b/g)||[]));
-      const uniqueKeys=[...new Set(keys)];if(uniqueKeys.length!==1)throw new Error(uniqueKeys.length?'检测到多个 API Key，请保留一个':'没有找到 API Key，请用 API Key: 标注');
-      data={baseUrl:urls[0],apiKey:uniqueKeys[0]};
-      if(/anthropic[_-]|x-api-key/i.test(text))inferred='claude';else if(/gemini[_-]|google[_-]|x-goog-api-key/i.test(text))inferred='gemini';
+  let data,entries,version,inferred='openai-chat';const text=source.trim();
+  const readJson=value=>{try{const result=JSON.parse(value);if(!result||typeof result!=='object'||Array.isArray(result))throw new Error();return result}catch{throw new Error('JSON 格式无效，请检查配置对象')}};
+  if(text.startsWith('{')||text.startsWith('"'))data=readJson(text.startsWith('{')?text:`{${text}}`);
+  else if(/^[a-z][a-z0-9+.-]*:\/\/\S+$/i.test(text)){
+    let link;try{link=new URL(text)}catch{throw new Error('导出链接无效')}
+    const encoded=link.searchParams.get('data');if(!encoded)throw new Error('导出链接缺少 data 参数');
+    version=link.searchParams.get('v');
+    try{const base64=encoded.replace(/ /g,'+').replace(/-/g,'+').replace(/_/g,'/');data=readJson(new TextDecoder('utf-8',{fatal:true}).decode(Uint8Array.from(atob(base64.padEnd(Math.ceil(base64.length/4)*4,'=')),c=>c.charCodeAt(0))))}catch{throw new Error('导出链接 data 不是有效的 Base64 JSON 配置')}
+  }else if(/^curl\s/i.test(text)){
+    entries=[];
+    const url=text.match(/^curl\s+(?:--url\s+)?["']?(https?:\/\/[^\s"'`]+)/i);if(url)entries.push(['baseUrl',url[1]]);
+    for(const match of text.matchAll(/(?:^|\s)(?:-H|--header)\s+(["'])(.*?)\1/g)){
+      const header=match[2].match(/^(Authorization|x-api-key|x-goog-api-key):\s*(.*?)\s*$/i);if(!header)continue;
+      if(/^authorization$/i.test(header[1])){const bearer=header[2].match(/^Bearer\s+(\S+)$/i);if(bearer)entries.push(['apiKey',bearer[1]])}
+      else entries.push([/^x-api-key$/i.test(header[1])?'ANTHROPIC_API_KEY':'GEMINI_API_KEY',header[2]]);
+    }
+  }else{
+    entries=[];let body=text,section='';
+    // A separately pasted auth.json contributes only OPENAI_API_KEY.
+    const auth=text.match(/^\s*\{[\s\S]*\}\s*$/m);
+    if(auth){const authData=readJson(auth[0]);if(typeof authData.OPENAI_API_KEY==='string')entries.push(['OPENAI_API_KEY',authData.OPENAI_API_KEY]);body=text.slice(0,auth.index)}
+    const root=body.split(/^\s*\[[^\]]+\]/m)[0];
+    const selected=root.match(/^\s*model_provider\s*=\s*["']([^"']+)["']\s*(?:#.*)?$/m)?.[1];
+    const providers=[...body.matchAll(/^\s*\[model_providers\.([^\]]+)\]\s*(?:#.*)?$/gm)].map(match=>match[1].replace(/^["']|["']$/g,''));
+    if(!selected&&new Set(providers).size>1)throw new Error('存在多个 provider，请指定 model_provider 或只粘贴一个渠道');
+    if(selected&&providers.length&&!providers.includes(selected))throw new Error('没有找到 model_provider 对应的配置段');
+    const provider=selected||providers[0];
+    for(const line of body.split(/\r?\n/)){
+      const heading=line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);if(heading){section=heading[1].replace(/^model_providers\.["'](.*)["']$/,'model_providers.$1');continue}
+      if(section&&section!==`model_providers.${provider}`)continue;
+      const match=line.match(/^\s*(?:export\s+)?(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([a-zA-Z_][\w -]*|地址|密钥|秘钥))\s*[:=：]\s*(?:"((?:\\.|[^"\\])*)"|'([^']*)'|([^\s#;,]+))\s*,?\s*(?:#.*)?$/);
+      if(!match)continue;
+      let value=match[4]??match[5]??match[6];if(match[4]!==undefined){try{value=JSON.parse(`"${match[4]}"`)}catch{throw new Error('配置字段的字符串转义无效')}}
+      entries.push([(match[1]||match[2]||match[3]).trim(),value]);
     }
   }
-  if(!data||typeof data!=='object'||Array.isArray(data))throw new Error('导入内容必须是 JSON 对象');
-  const fields={...data,...(data.env&&typeof data.env==='object'?data.env:{})};
-  const find=names=>Object.entries(fields).find(([key,value])=>names.includes(key.toLowerCase().replace(/[^a-z]/g,''))&&typeof value==='string')?.[1];
-  data={name:data.name,baseUrl:find(['baseurl','url','apibase','openaibaseurl','anthropicbaseurl','geminibaseurl']),apiKey:find(['apikey','key','token','openaiapikey','anthropicapikey','anthropicauthtoken','geminiapikey','googleapikey'])};
-  if(Object.keys(fields).some(k=>/^anthropic/i.test(k)))inferred='claude';else if(Object.keys(fields).some(k=>/^(gemini|google)/i.test(k)))inferred='gemini';
-  if(typeof data.baseUrl!=='string'||!/^https?:\/\//i.test(data.baseUrl))throw new Error('缺少有效的 baseUrl');
-  if(typeof data.apiKey!=='string'||!data.apiKey.trim())throw new Error('缺少 apiKey');
-  const address=new URL(data.baseUrl);if(!address.hostname)throw new Error('URL 无效');
+  if(!entries)entries=[data,data.env,data.options].filter(value=>value&&typeof value==='object'&&!Array.isArray(value)).flatMap(value=>Object.entries(value));
+  const normalize=key=>key.toLowerCase().replace(/[_ -]/g,'');
+  const baseNames=['baseurl','url','apibase','openaibaseurl','anthropicbaseurl','geminibaseurl','地址'];
+  const keyNames=['apikey','experimentalbearertoken','openaiapikey','anthropicapikey','anthropicauthtoken','geminiapikey','googleapikey','密钥','秘钥'];
+  const find=names=>{const values=[...new Set(entries.filter(([key,value])=>names.includes(normalize(key))&&typeof value==='string').map(([,value])=>value.trim()).filter(Boolean))];if(values.length>1)throw new Error(`配置中存在多个不同的 ${names[0]}，请只保留一个渠道`);return values[0]};
+  const baseUrl=find(baseNames),apiKey=find(keyNames),wire=find(['wireapi']),npm=find(['npm']);
+  const recognized=entries.map(([key])=>normalize(key)).filter(key=>baseNames.includes(key)||keyNames.includes(key));
+  if(recognized.some(key=>key.startsWith('anthropic')))inferred='claude';else if(recognized.some(key=>/^(gemini|google)/.test(key)))inferred='gemini';
+  if(wire==='responses'||npm==='@ai-sdk/openai')inferred='openai-responses';if(wire==='chat')inferred='openai-chat';
+  if(!baseUrl||!/^https?:\/\//i.test(baseUrl))throw new Error('缺少明确的 base_url/baseURL 字段');
+  if(!apiKey)throw new Error('缺少明确的 apiKey、OPENAI_API_KEY 或 experimental_bearer_token 字段');
+  let address;try{address=new URL(baseUrl)}catch{throw new Error('上游地址无效')}
+  if(!address.hostname||address.username||address.password||address.search||address.hash)throw new Error('上游地址只能包含协议、主机、端口和路径');
+  // Upstream request routes already include /v1.
+  const normalizedUrl=baseUrl.replace(/\/v1\/?$/i,'').replace(/\/$/,'');
   const types={'1':'openai-responses','2':'claude','3':'gemini','4':'openai-chat'};
-  return {...data,type:type==='auto'?(types[version]||inferred):type};
+  const targetType=type==='auto'?(types[version]||inferred):type;
+  if(!['openai-chat','openai-responses','claude','gemini'].includes(targetType))throw new Error('导入协议无效');
+  return {name:find(['name']),baseUrl:normalizedUrl,apiKey,type:targetType};
 }
 $('importForm').addEventListener('submit',e=>{e.preventDefault();try{const data=parseImport($('importSource').value,$('importType').value);$('importDialog').close();openNewChannel();$('name').value=String(data.name||'Imported');$('baseUrl').value=data.baseUrl;$('apiKey').value=data.apiKey;$('type').value=data.type;$('importSource').value='';$('formTitle').textContent='导入渠道 · 检查后保存'}catch(error){$('importNotice').textContent=`解析失败：${error.message}`}});
+$('importDialog').addEventListener('close',()=>{$('importSource').value=''});
+$('editorDialog').addEventListener('close',()=>{$('largeEditor').value='';$('applyEditor').onclick=null});
 document.querySelectorAll('textarea:not(#largeEditor)').forEach(field=>{const tools=document.createElement('span');tools.className='field-tools';const expand=document.createElement('button');expand.type='button';expand.textContent='⛶';expand.title='扩大文本编辑';expand.setAttribute('aria-label',expand.title);expand.onclick=()=>{$('editorTitle').textContent='扩大编辑';$('largeEditor').value=field.value;$('applyEditor').onclick=()=>{field.value=$('largeEditor').value;field.dispatchEvent(new Event('input',{bubbles:true}));$('editorDialog').close()};$('editorDialog').showModal();$('largeEditor').focus()};tools.append(expand);field.before(tools)});
 </script></body></html>
